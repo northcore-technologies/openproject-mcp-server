@@ -82,7 +82,7 @@ try:
     # Northcore fork additions
     from src.tools import custom_fields    # 1 tool: list_custom_fields
     from src.tools import attachments      # 4 tools: list, upload, download, delete
-    from src.tools import watchers         # 4 tools: list/add/remove watcher, list_categories
+    from src.tools import watchers         # watchers, list_categories, list_sprints, list_budgets
     from src.tools import project_copy     # 2 tools: list_template_projects, copy_project
     from src.tools import notifications    # 2 tools: list_notifications, mark_notifications_read
     from src.tools import bulk             # 1 tool: bulk_update_work_packages

@@ -15,8 +15,11 @@ Deployed from the `northcore` branch on darpa (10.10.2.67), published at `https:
 | Custom fields | New tool `list_custom_fields` (by work package, or project + type) with options and current values |
 | Attachments | New tools `list_attachments`, `upload_attachment` (text or base64, max 20 MB), `download_attachment` (text, or base64 for binary), `delete_attachment` |
 | Projects | `custom_fields` on `create_project`/`update_project` for project attributes (e.g. Client, AO); `get_project` shows them; new tool `list_project_attributes` with options |
+| Work packages | New tool `get_work_package` (full detail incl. custom fields, backlogs, budget, costs) — missing upstream despite README |
+| Backlogs | `story_points`, `sprint_id` on create/update/bulk; new tool `list_sprints` (falls back to versions on older OpenProject). Backlog position is read-only in the API |
+| Costs | `budget_id` on create/update/bulk; new tool `list_budgets`; spent time and labor/unit/overall costs shown read-only (cost entries can't be written via API v3) |
 | Watchers | New tools `list_watchers`, `add_watcher`, `remove_watcher` |
-| Categories | `category_id` on create/update; new tool `list_categories` |
+| Categories | `category_id` on create/update; new tool `list_categories`. Creating categories isn't possible via API v3 (Project settings → Work packages → Categories) |
 | Search | `search_work_packages(full_text=True)` searches subject, description and comments |
 | Templates | New tools `list_template_projects`, `copy_project` (waits for OpenProject's copy job, choose what to copy) |
 | Versions | New tools `update_version`, `delete_version` |
