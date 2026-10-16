@@ -63,7 +63,7 @@ async def list_custom_fields(
                 line += f": {_current_value(wp, key, ftype)}"
             text += line + "\n"
             if "CustomOption" in ftype:
-                options = client.custom_field_options(field)
+                options = await client.load_field_options(field)
                 if options:
                     labels = ", ".join(str(o.get("title")) for o in options[:30])
                     more = f" (+{len(options) - 30} more)" if len(options) > 30 else ""

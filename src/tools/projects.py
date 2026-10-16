@@ -1,7 +1,7 @@
 """Project management tools."""
 
 import json
-from typing import Optional
+from typing import Any, Dict, Optional
 from src.server import mcp, get_client
 from pydantic import BaseModel, Field
 from src.utils.formatting import format_success, format_error
@@ -129,6 +129,10 @@ async def get_project(project_id: int) -> str:
             if desc_text:
                 text += f"\n**Description**:\n{desc_text}\n"
 
+        attrs = await _project_attribute_lines(client, project)
+        if attrs:
+            text += "\n**Project attributes**:\n" + "\n".join(attrs) + "\n"
+
         if project.get('createdAt'):
             text += f"\n**Created**: {project['createdAt']}\n"
         if project.get('updatedAt'):
@@ -148,6 +152,12 @@ class CreateProjectInput(BaseModel):
     public: Optional[bool] = Field(None, description="Whether project is public")
     status: Optional[str] = Field(None, description="Project status")
     parent_id: Optional[int] = Field(None, description="Parent project ID for sub-projects", gt=0)
+    custom_fields: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Project attributes keyed by name or 'customFieldN' (e.g. {\"Client\": \"Vattenfall\", \"AO\": \"12345\"}). "
+        "List attributes take the option label or id, user attributes a user id, null clears. "
+        "Use list_project_attributes to see them.",
+    )
 
 
 class AddSubprojectInput(BaseModel):
@@ -168,6 +178,12 @@ class UpdateProjectInput(BaseModel):
     public: Optional[bool] = Field(None, description="Whether project is public")
     status: Optional[str] = Field(None, description="New project status")
     parent_id: Optional[int] = Field(None, description="New parent project ID", gt=0)
+    custom_fields: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Project attributes keyed by name or 'customFieldN' (e.g. {\"Client\": \"Vattenfall\", \"AO\": \"12345\"}). "
+        "List attributes take the option label or id, user attributes a user id, null clears. "
+        "Use list_project_attributes to see them.",
+    )
 
 
 @mcp.tool
@@ -204,6 +220,8 @@ async def create_project(input: CreateProjectInput) -> str:
             data["status"] = input.status
         if input.parent_id is not None:
             data["parent_id"] = input.parent_id
+        if input.custom_fields:
+            data["custom_fields"] = input.custom_fields
 
         result = await client.create_project(data)
 
@@ -213,6 +231,9 @@ async def create_project(input: CreateProjectInput) -> str:
         text += f"**Identifier**: {result.get('identifier', 'N/A')}\n"
         text += f"**Public**: {'Yes' if result.get('public') else 'No'}\n"
         text += f"**Status**: {result.get('status', 'N/A')}\n"
+        attrs = await _project_attribute_lines(client, result, only_set=True)
+        if attrs:
+            text += "**Project attributes**:\n" + "\n".join(attrs) + "\n"
 
         return text
 
@@ -355,6 +376,8 @@ async def update_project(input: UpdateProjectInput) -> str:
             update_data["status"] = input.status
         if input.parent_id is not None:
             update_data["parent_id"] = input.parent_id
+        if input.custom_fields:
+            update_data["custom_fields"] = input.custom_fields
 
         if not update_data:
             return format_error("No fields provided to update")
@@ -366,6 +389,9 @@ async def update_project(input: UpdateProjectInput) -> str:
         text += f"**Identifier**: {result.get('identifier', 'N/A')}\n"
         text += f"**Public**: {'Yes' if result.get('public') else 'No'}\n"
         text += f"**Status**: {result.get('status', 'N/A')}\n"
+        attrs = await _project_attribute_lines(client, result, only_set=True)
+        if attrs:
+            text += "**Project attributes**:\n" + "\n".join(attrs) + "\n"
 
         return text
 
@@ -395,3 +421,65 @@ async def delete_project(project_id: int) -> str:
 
     except Exception as e:
         return format_error(f"Failed to delete project: {str(e)}")
+
+
+def _attr_value(project: dict, key: str) -> str:
+    links = project.get("_links", {})
+    if key in links:
+        link = links[key]
+        items = link if isinstance(link, list) else [link]
+        titles = [str(i.get("title") or i.get("href")) for i in items if i and i.get("href")]
+        return ", ".join(titles) if titles else "—"
+    value = project.get(key)
+    if isinstance(value, dict):
+        value = value.get("raw")
+    return "—" if value in (None, "") else str(value)
+
+
+async def _project_attribute_lines(client, project: dict, only_set: bool = False) -> list:
+    """'- **Name**: value' lines for the project's attributes (names from the schema)."""
+    keys = [k for k in list(project.keys()) + list(project.get("_links", {}).keys()) if k.startswith("customField")]
+    if not keys:
+        return []
+    try:
+        fields = client.schema_custom_fields(await client.get_project_schema(project.get("id")))
+    except Exception:
+        fields = {}
+    lines = []
+    for key in sorted(set(keys), key=lambda k: str(fields.get(k, {}).get("name", k))):
+        value = _attr_value(project, key)
+        if only_set and value == "—":
+            continue
+        lines.append(f"- **{fields.get(key, {}).get('name', key)}** (`{key}`): {value}")
+    return lines
+
+
+@mcp.tool
+async def list_project_attributes(project_id: int) -> str:
+    """List a project's attributes (project custom fields such as Client, AO) with
+    type, allowed options and current values. Set them with update_project custom_fields."""
+    try:
+        client = get_client()
+        project = await client.get_project(project_id)
+        fields = client.schema_custom_fields(await client.get_project_schema(project_id))
+        if not fields:
+            return f"No project attributes are enabled for project #{project_id}."
+        text = f"✅ **{len(fields)} project attribute(s) on {project.get('name')} (#{project_id})**\n\n"
+        for key, field in sorted(fields.items(), key=lambda kv: str(kv[1].get("name"))):
+            ftype = str(field.get("type", ""))
+            line = f"- **{field.get('name')}** (`{key}`, {ftype}"
+            if field.get("required"):
+                line += ", required"
+            if not field.get("writable", True):
+                line += ", read-only"
+            text += line + f"): {_attr_value(project, key)}\n"
+            if "CustomOption" in ftype:
+                options = await client.load_field_options(field)
+                if options:
+                    labels = ", ".join(str(o.get("title")) for o in options[:30])
+                    more = f" (+{len(options) - 30} more)" if len(options) > 30 else ""
+                    text += f"  Options: {labels}{more}\n"
+        return text
+    except Exception as e:
+        return format_error(f"Failed to list project attributes: {str(e)}")
+

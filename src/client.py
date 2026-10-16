@@ -283,7 +283,7 @@ class OpenProjectClient:
             schema = await self.get_work_package_schema(
                 project_id=data.get("project"), type_id=data.get("type")
             )
-            data["cf_props"], data["cf_links"] = self.resolve_custom_fields(
+            data["cf_props"], data["cf_links"] = await self.resolve_custom_fields(
                 schema, data["custom_fields"]
             )
 
@@ -511,7 +511,7 @@ class OpenProjectClient:
         if data.get("custom_fields"):
             schema_href = current_wp.get("_links", {}).get("schema", {}).get("href")
             schema = await self.get_work_package_schema(schema_href=schema_href)
-            data["cf_props"], data["cf_links"] = self.resolve_custom_fields(
+            data["cf_props"], data["cf_links"] = await self.resolve_custom_fields(
                 schema, data["custom_fields"]
             )
 
@@ -882,6 +882,13 @@ class OpenProjectClient:
                 "href": f"/api/v3/projects/{data['parent_id']}"
             }
 
+        if data.get("custom_fields"):
+            schema = await self.get_project_schema(form_payload=dict(payload))
+            props, links = await self.resolve_custom_fields(schema, data["custom_fields"])
+            payload.update(props)
+            if links:
+                payload.setdefault("_links", {}).update(links)
+
         return await self._request("POST", "/projects", payload)
 
     async def update_project(self, project_id: int, data: Dict) -> Dict:
@@ -922,6 +929,13 @@ class OpenProjectClient:
             payload["_links"]["parent"] = {
                 "href": f"/api/v3/projects/{data['parent_id']}"
             }
+
+        if data.get("custom_fields"):
+            schema = await self.get_project_schema(project_id=project_id)
+            props, links = await self.resolve_custom_fields(schema, data["custom_fields"])
+            payload.update(props)
+            if links:
+                payload.setdefault("_links", {}).update(links)
 
         return await self._request("PATCH", f"/projects/{project_id}", payload)
 
@@ -1563,7 +1577,20 @@ class OpenProjectClient:
                     options.append({"href": link.get("href"), "title": link.get("title")})
         return options
 
-    def resolve_custom_fields(self, schema: Dict, custom_fields: Dict[str, Any]) -> tuple:
+    async def load_field_options(self, field: Dict) -> List[Dict]:
+        """Allowed values for a list field; fetches the linked collection if not embedded."""
+        options = self.custom_field_options(field)
+        if options:
+            return options
+        link = field.get("_links", {}).get("allowedValues")
+        if isinstance(link, dict) and link.get("href"):
+            result = await self._request("GET", link["href"].replace("/api/v3", "", 1))
+            for item in result.get("_embedded", {}).get("elements", []):
+                href = item.get("_links", {}).get("self", {}).get("href")
+                options.append({"href": href, "title": item.get("value") or item.get("name")})
+        return options
+
+    async def resolve_custom_fields(self, schema: Dict, custom_fields: Dict[str, Any]) -> tuple:
         """Translate {name_or_key: value} into (properties, _links) for the API.
 
         Keys may be 'customField5' or the field's display name (case-insensitive).
@@ -1580,7 +1607,7 @@ class OpenProjectClient:
             if not cf_key:
                 available = ", ".join(f"{v.get('name')} ({k})" for k, v in fields.items())
                 raise ValueError(
-                    f"Unknown custom field '{key}' for this project/type. "
+                    f"Unknown custom field '{key}' here. "
                     f"Available: {available or 'none'}"
                 )
             field = fields[cf_key]
@@ -1590,7 +1617,7 @@ class OpenProjectClient:
             values = value if isinstance(value, list) else [value]
 
             if base == "CustomOption":
-                options = self.custom_field_options(field)
+                options = await self.load_field_options(field)
 
                 def to_href(v):
                     if v is None:
@@ -1766,4 +1793,23 @@ class OpenProjectClient:
     async def mark_all_notifications_read(self) -> bool:
         await self._request("POST", "/notifications/read_ian")
         return True
+
+    # ------------------------------------------------------------------
+    # Project attributes (project custom fields)
+    # ------------------------------------------------------------------
+    async def get_project_schema(
+        self, project_id: Optional[int] = None, form_payload: Optional[Dict] = None
+    ) -> Dict:
+        """Schema with the project attributes (customFieldN) for a project or a new project."""
+        try:
+            if project_id:
+                form = await self._request("POST", f"/projects/{project_id}/form", {})
+            else:
+                form = await self._request("POST", "/projects/form", form_payload or {})
+            schema = form.get("_embedded", {}).get("schema")
+            if schema:
+                return schema
+        except Exception as e:
+            logger.debug(f"Project form unavailable, falling back to /projects/schema: {e}")
+        return await self._request("GET", "/projects/schema")
 
