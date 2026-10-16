@@ -874,7 +874,11 @@ class OpenProjectClient:
         if "public" in data:
             payload["public"] = data["public"]
         if "status" in data:
-            payload["status"] = data["status"]
+            payload.setdefault("_links", {})["status"] = {
+                "href": f"/api/v3/project_statuses/{data['status']}" if data["status"] else None
+            }
+        if "status_explanation" in data:
+            payload["statusExplanation"] = {"raw": data["status_explanation"]}
         if "parent_id" in data:
             if "_links" not in payload:
                 payload["_links"] = {}
@@ -922,7 +926,11 @@ class OpenProjectClient:
         if "public" in data:
             payload["public"] = data["public"]
         if "status" in data:
-            payload["status"] = data["status"]
+            payload.setdefault("_links", {})["status"] = {
+                "href": f"/api/v3/project_statuses/{data['status']}" if data["status"] else None
+            }
+        if "status_explanation" in data:
+            payload["statusExplanation"] = {"raw": data["status_explanation"]}
         if "parent_id" in data:
             if "_links" not in payload:
                 payload["_links"] = {}
