@@ -191,6 +191,10 @@ def format_work_package_detail(wp: Dict) -> str:
     else:
         text += f"**Assignee**: Unassigned\n"
 
+    category_link = links.get("category")
+    if category_link and category_link.get("href"):
+        text += f"**Category**: {category_link.get('title', 'Unknown')}\n"
+
     responsible_link = links.get("responsible")
     if responsible_link and responsible_link.get("href"):
         text += f"**Accountable**: {responsible_link.get('title', 'Unknown')}\n"

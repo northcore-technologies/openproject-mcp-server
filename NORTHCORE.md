@@ -14,6 +14,13 @@ Deployed from the `northcore` branch on darpa (10.10.2.67), published at `https:
 | Custom fields | `custom_fields` on create/update, keyed by field name or `customFieldN`. List fields take option label or id, user/version fields take ids, `null` clears |
 | Custom fields | New tool `list_custom_fields` (by work package, or project + type) with options and current values |
 | Attachments | New tools `list_attachments`, `upload_attachment` (text or base64, max 20 MB), `download_attachment` (text, or base64 for binary), `delete_attachment` |
+| Watchers | New tools `list_watchers`, `add_watcher`, `remove_watcher` |
+| Categories | `category_id` on create/update; new tool `list_categories` |
+| Search | `search_work_packages(full_text=True)` searches subject, description and comments |
+| Templates | New tools `list_template_projects`, `copy_project` (waits for OpenProject's copy job, choose what to copy) |
+| Versions | New tools `update_version`, `delete_version` |
+| Notifications | New tools `list_notifications`, `mark_notifications_read` (for the API token's user) |
+| Bulk | New tool `bulk_update_work_packages` (same fields as update, per-item result) |
 
 ## Deploy (darpa)
 

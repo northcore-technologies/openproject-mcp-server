@@ -312,6 +312,10 @@ class OpenProjectClient:
             payload["_links"]["responsible"] = {
                 "href": f"/api/v3/users/{data['responsible_id']}"
             }
+        if "category_id" in data:
+            payload.setdefault("_links", {})["category"] = {
+                "href": f"/api/v3/categories/{data['category_id']}" if data["category_id"] else None
+            }
         if "estimated_hours" in data:
             payload["estimatedTime"] = hours_to_iso_duration(data["estimated_hours"])
         if "remaining_hours" in data:
@@ -543,6 +547,10 @@ class OpenProjectClient:
                 payload["_links"] = {}
             payload["_links"]["responsible"] = {
                 "href": f"/api/v3/users/{data['responsible_id']}"
+            }
+        if "category_id" in data:
+            payload.setdefault("_links", {})["category"] = {
+                "href": f"/api/v3/categories/{data['category_id']}" if data["category_id"] else None
             }
         if "estimated_hours" in data:
             payload["estimatedTime"] = hours_to_iso_duration(data["estimated_hours"])
@@ -1662,5 +1670,100 @@ class OpenProjectClient:
     async def delete_attachment(self, attachment_id: int) -> bool:
         """Delete an attachment."""
         await self._request("DELETE", f"/attachments/{attachment_id}")
+        return True
+
+    # ------------------------------------------------------------------
+    # Watchers
+    # ------------------------------------------------------------------
+    async def get_watchers(self, work_package_id: int) -> Dict:
+        return await self._request("GET", f"/work_packages/{work_package_id}/watchers")
+
+    async def add_watcher(self, work_package_id: int, user_id: int) -> Dict:
+        return await self._request(
+            "POST",
+            f"/work_packages/{work_package_id}/watchers",
+            {"user": {"href": f"/api/v3/users/{user_id}"}},
+        )
+
+    async def remove_watcher(self, work_package_id: int, user_id: int) -> bool:
+        await self._request("DELETE", f"/work_packages/{work_package_id}/watchers/{user_id}")
+        return True
+
+    # ------------------------------------------------------------------
+    # Categories
+    # ------------------------------------------------------------------
+    async def get_categories(self, project_id: int) -> Dict:
+        return await self._request("GET", f"/projects/{project_id}/categories")
+
+    # ------------------------------------------------------------------
+    # Versions (update/delete)
+    # ------------------------------------------------------------------
+    async def update_version(self, version_id: int, data: Dict) -> Dict:
+        payload: Dict[str, Any] = {}
+        if "name" in data:
+            payload["name"] = data["name"]
+        if "description" in data:
+            payload["description"] = {"raw": data["description"]}
+        if "start_date" in data:
+            payload["startDate"] = data["start_date"]
+        if "end_date" in data:
+            payload["endDate"] = data["end_date"]
+        if "status" in data:
+            payload["status"] = data["status"]
+        if "sharing" in data:
+            payload["sharing"] = data["sharing"]
+        return await self._request("PATCH", f"/versions/{version_id}", payload)
+
+    async def delete_version(self, version_id: int) -> bool:
+        await self._request("DELETE", f"/versions/{version_id}")
+        return True
+
+    # ------------------------------------------------------------------
+    # Project copy / templates
+    # ------------------------------------------------------------------
+    async def copy_project(
+        self,
+        source_project_id: int,
+        name: str,
+        identifier: Optional[str] = None,
+        parent_id: Optional[int] = None,
+        copy_options: Optional[Dict[str, bool]] = None,
+        send_notifications: bool = False,
+        wait_seconds: int = 60,
+    ) -> Dict:
+        """Copy a project (async job in OpenProject) and wait for the result."""
+        payload: Dict[str, Any] = {"name": name, "_meta": {"sendNotifications": send_notifications}}
+        if identifier:
+            payload["identifier"] = identifier
+        if parent_id:
+            payload["_links"] = {"parent": {"href": f"/api/v3/projects/{parent_id}"}}
+        for key, value in (copy_options or {}).items():
+            payload["_meta"][key] = value
+
+        job = await self._request("POST", f"/projects/{source_project_id}/copy", payload)
+        job_href = job.get("_links", {}).get("self", {}).get("href", "")
+        waited = 0.0
+        while job.get("status") in ("in_queue", "in_process") and job_href and waited < wait_seconds:
+            await asyncio.sleep(2)
+            waited += 2
+            job = await self._request("GET", job_href.replace("/api/v3", "", 1))
+        return job
+
+    # ------------------------------------------------------------------
+    # Notifications (in-app)
+    # ------------------------------------------------------------------
+    async def get_notifications(self, unread_only: bool = True, page_size: int = 25) -> Dict:
+        endpoint = f"/notifications?pageSize={page_size}"
+        if unread_only:
+            filters = json.dumps([{"readIAN": {"operator": "=", "values": ["f"]}}])
+            endpoint += f"&filters={quote(filters)}"
+        return await self._request("GET", endpoint)
+
+    async def mark_notification_read(self, notification_id: int) -> bool:
+        await self._request("POST", f"/notifications/{notification_id}/read_ian")
+        return True
+
+    async def mark_all_notifications_read(self) -> bool:
+        await self._request("POST", "/notifications/read_ian")
         return True
 
