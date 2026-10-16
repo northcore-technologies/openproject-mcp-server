@@ -83,6 +83,32 @@ class OpenProjectClient:
         credentials = f"apikey:{self.api_key}"
         return base64.b64encode(credentials.encode()).decode()
 
+    @staticmethod
+    def _page_number(offset: Optional[int], page_size: Optional[int]) -> int:
+        """Tools pass a 0-based item index; OpenProject's `offset` is a 1-based page number."""
+        size = page_size or 20
+        return max(int(offset or 0), 0) // size + 1
+
+    async def _get_all(self, endpoint: str, max_items: int = 2000, page_size: int = 100) -> Dict:
+        """GET a collection and follow pagination until all elements (up to max_items) are fetched."""
+        sep = "&" if "?" in endpoint else "?"
+        page = 1
+        result: Dict = {}
+        elements: List[Dict] = []
+        while True:
+            chunk = await self._request("GET", f"{endpoint}{sep}pageSize={page_size}&offset={page}")
+            if page == 1:
+                result = chunk
+            batch = chunk.get("_embedded", {}).get("elements", [])
+            elements.extend(batch)
+            total = chunk.get("total", len(elements))
+            if not batch or len(elements) >= total or len(elements) >= max_items or len(batch) < page_size:
+                break
+            page += 1
+        result.setdefault("_embedded", {})["elements"] = elements[:max_items]
+        result["count"] = len(result["_embedded"]["elements"])
+        return result
+
     async def _request(
         self, method: str, endpoint: str, data: Optional[Dict] = None
     ) -> Dict:
@@ -193,7 +219,7 @@ class OpenProjectClient:
             encoded_filters = quote(filters)
             endpoint += f"?filters={encoded_filters}"
 
-        result = await self._request("GET", endpoint)
+        result = await self._get_all(endpoint)
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -233,7 +259,7 @@ class OpenProjectClient:
             encoded_filters = quote(filters)
             query_params.append(f"filters={encoded_filters}")
         if offset is not None:
-            query_params.append(f"offset={offset}")
+            query_params.append(f"offset={self._page_number(offset, page_size)}")
         if page_size is not None:
             query_params.append(f"pageSize={page_size}")
 
@@ -371,7 +397,7 @@ class OpenProjectClient:
         else:
             endpoint = "/types"
 
-        result = await self._request("GET", endpoint)
+        result = await self._get_all(endpoint)
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -396,7 +422,7 @@ class OpenProjectClient:
             encoded_filters = quote(filters)
             endpoint += f"?filters={encoded_filters}"
 
-        result = await self._request("GET", endpoint)
+        result = await self._get_all(endpoint)
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -444,7 +470,7 @@ class OpenProjectClient:
             filter_string = quote(json.dumps(filters))
             endpoint += f"?filters={filter_string}"
 
-        result = await self._request("GET", endpoint)
+        result = await self._get_all(endpoint)
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -461,7 +487,7 @@ class OpenProjectClient:
         Returns:
             Dict: API response containing statuses
         """
-        result = await self._request("GET", "/statuses")
+        result = await self._get_all("/statuses")
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -478,7 +504,7 @@ class OpenProjectClient:
         Returns:
             Dict: API response containing priorities
         """
-        result = await self._request("GET", "/priorities")
+        result = await self._get_all("/priorities")
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -694,7 +720,7 @@ class OpenProjectClient:
             encoded_filters = quote(filters)
             endpoint += f"?filters={encoded_filters}"
 
-        result = await self._request("GET", endpoint)
+        result = await self._get_all(endpoint)
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -817,7 +843,7 @@ class OpenProjectClient:
         else:
             endpoint = "/versions"
 
-        result = await self._request("GET", endpoint)
+        result = await self._get_all(endpoint)
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -1036,7 +1062,7 @@ class OpenProjectClient:
         Returns:
             Dict: API response containing roles
         """
-        result = await self._request("GET", "/roles")
+        result = await self._get_all("/roles")
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -1244,7 +1270,7 @@ class OpenProjectClient:
         # Build query parameters
         query_params = [f"filters={quote(filters)}"]
         if offset is not None:
-            query_params.append(f"offset={offset}")
+            query_params.append(f"offset={self._page_number(offset, page_size)}")
         if page_size is not None:
             query_params.append(f"pageSize={page_size}")
 
@@ -1321,7 +1347,7 @@ class OpenProjectClient:
             encoded_filters = quote(filters)
             endpoint += f"?filters={encoded_filters}"
 
-        result = await self._request("GET", endpoint)
+        result = await self._get_all(endpoint)
 
         # Ensure proper response structure
         if "_embedded" not in result:
@@ -1421,7 +1447,7 @@ class OpenProjectClient:
             encoded_sort = quote(sort_by)
             query_params.append(f"sortBy={encoded_sort}")
         if offset is not None:
-            query_params.append(f"offset={offset}")
+            query_params.append(f"offset={self._page_number(offset, page_size)}")
         if page_size is not None:
             query_params.append(f"pageSize={page_size}")
 
@@ -1683,7 +1709,7 @@ class OpenProjectClient:
     # ------------------------------------------------------------------
     async def get_work_package_attachments(self, work_package_id: int) -> Dict:
         """List attachments of a work package."""
-        return await self._request("GET", f"/work_packages/{work_package_id}/attachments")
+        return await self._get_all(f"/work_packages/{work_package_id}/attachments")
 
     async def get_attachment(self, attachment_id: int) -> Dict:
         """Get attachment metadata."""
@@ -1731,7 +1757,7 @@ class OpenProjectClient:
     # Watchers
     # ------------------------------------------------------------------
     async def get_watchers(self, work_package_id: int) -> Dict:
-        return await self._request("GET", f"/work_packages/{work_package_id}/watchers")
+        return await self._get_all(f"/work_packages/{work_package_id}/watchers")
 
     async def add_watcher(self, work_package_id: int, user_id: int) -> Dict:
         return await self._request(
@@ -1748,7 +1774,7 @@ class OpenProjectClient:
     # Categories
     # ------------------------------------------------------------------
     async def get_categories(self, project_id: int) -> Dict:
-        return await self._request("GET", f"/projects/{project_id}/categories")
+        return await self._get_all(f"/projects/{project_id}/categories")
 
     # ------------------------------------------------------------------
     # Versions (update/delete)
@@ -1845,8 +1871,8 @@ class OpenProjectClient:
     # Backlogs (sprints) and budgets
     # ------------------------------------------------------------------
     async def get_sprints(self, project_id: int) -> Dict:
-        return await self._request("GET", f"/projects/{project_id}/sprints?pageSize=100")
+        return await self._get_all(f"/projects/{project_id}/sprints")
 
     async def get_budgets(self, project_id: int) -> Dict:
-        return await self._request("GET", f"/projects/{project_id}/budgets")
+        return await self._get_all(f"/projects/{project_id}/budgets")
 
