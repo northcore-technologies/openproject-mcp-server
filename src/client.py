@@ -22,6 +22,34 @@ logger = logging.getLogger(__name__)
 __version__ = "2.0.0"
 
 
+def hours_to_iso_duration(hours: float) -> str:
+    """Convert hours (e.g. 2.5) to ISO 8601 duration (PT2.5H) as used by OpenProject."""
+    value = float(hours)
+    text = str(int(value)) if value.is_integer() else f"{value:g}"
+    return f"PT{text}H"
+
+
+def iso_duration_to_hours(duration: Optional[str]) -> Optional[float]:
+    """Convert an ISO 8601 duration (P1DT2H30M, PT2.5H) to hours. Days count as 24h."""
+    if not duration:
+        return None
+    import re
+    m = re.fullmatch(
+        r"P(?:(?P<d>[\d.]+)D)?(?:T(?:(?P<h>[\d.]+)H)?(?:(?P<m>[\d.]+)M)?(?:(?P<s>[\d.]+)S)?)?",
+        duration,
+    )
+    if not m:
+        return None
+    d, h, mi, se = (float(m.group(g) or 0) for g in ("d", "h", "m", "s"))
+    return round(d * 24 + h + mi / 60 + se / 3600, 2)
+
+
+def format_hours(duration: Optional[str]) -> str:
+    """Human-readable hours for an ISO 8601 duration ('2.5 h'); falls back to the raw value."""
+    hours = iso_duration_to_hours(duration)
+    return f"{hours:g} h" if hours is not None else str(duration)
+
+
 class OpenProjectClient:
     """Client for the OpenProject API v3 with optional proxy support"""
 
@@ -250,6 +278,15 @@ class OpenProjectClient:
         # Get form with initial payload
         form = await self._request("POST", "/work_packages/form", form_payload)
 
+        # Resolve custom fields against the project/type schema
+        if data.get("custom_fields"):
+            schema = await self.get_work_package_schema(
+                project_id=data.get("project"), type_id=data.get("type")
+            )
+            data["cf_props"], data["cf_links"] = self.resolve_custom_fields(
+                schema, data["custom_fields"]
+            )
+
         # Use form payload and add additional fields
         payload = form.get("payload", form_payload)
         payload["lockVersion"] = form.get("lockVersion", 0)
@@ -275,6 +312,18 @@ class OpenProjectClient:
             payload["_links"]["responsible"] = {
                 "href": f"/api/v3/users/{data['responsible_id']}"
             }
+        if "estimated_hours" in data:
+            payload["estimatedTime"] = hours_to_iso_duration(data["estimated_hours"])
+        if "remaining_hours" in data:
+            payload["remainingTime"] = hours_to_iso_duration(data["remaining_hours"])
+        if "duration_days" in data:
+            payload["duration"] = f"P{int(data['duration_days'])}D"
+        if "schedule_manually" in data:
+            payload["scheduleManually"] = bool(data["schedule_manually"])
+        if "cf_props" in data:
+            payload.update(data["cf_props"])
+        if data.get("cf_links"):
+            payload.setdefault("_links", {}).update(data["cf_links"])
         if "version_id" in data:
             if "_links" not in payload:
                 payload["_links"] = {}
@@ -454,6 +503,14 @@ class OpenProjectClient:
         # Prepare payload with lock version
         payload = {"lockVersion": current_wp.get("lockVersion", 0)}
 
+        # Resolve custom fields against this work package's schema
+        if data.get("custom_fields"):
+            schema_href = current_wp.get("_links", {}).get("schema", {}).get("href")
+            schema = await self.get_work_package_schema(schema_href=schema_href)
+            data["cf_props"], data["cf_links"] = self.resolve_custom_fields(
+                schema, data["custom_fields"]
+            )
+
         # Add fields to update
         if "subject" in data:
             payload["subject"] = data["subject"]
@@ -487,6 +544,18 @@ class OpenProjectClient:
             payload["_links"]["responsible"] = {
                 "href": f"/api/v3/users/{data['responsible_id']}"
             }
+        if "estimated_hours" in data:
+            payload["estimatedTime"] = hours_to_iso_duration(data["estimated_hours"])
+        if "remaining_hours" in data:
+            payload["remainingTime"] = hours_to_iso_duration(data["remaining_hours"])
+        if "duration_days" in data:
+            payload["duration"] = f"P{int(data['duration_days'])}D"
+        if "schedule_manually" in data:
+            payload["scheduleManually"] = bool(data["schedule_manually"])
+        if "cf_props" in data:
+            payload.update(data["cf_props"])
+        if data.get("cf_links"):
+            payload.setdefault("_links", {}).update(data["cf_links"])
         if "version_id" in data:
             if "_links" not in payload:
                 payload["_links"] = {}
@@ -1405,5 +1474,193 @@ class OpenProjectClient:
             bool: True if successful
         """
         await self._request("DELETE", f"/news/{news_id}")
+        return True
+
+    # ------------------------------------------------------------------
+    # Raw (non-JSON) requests – used for attachments
+    # ------------------------------------------------------------------
+    async def _raw_request(
+        self,
+        method: str,
+        url: str,
+        data: Any = None,
+        accept: str = "*/*",
+    ) -> tuple:
+        """Execute a request without JSON encoding. Returns (status, headers, body bytes)."""
+        if url.startswith("/"):
+            url = f"{self.base_url}{url}"
+        headers = {
+            "Authorization": self.headers["Authorization"],
+            "Accept": accept,
+            "User-Agent": self.headers["User-Agent"],
+        }
+        connector = aiohttp.TCPConnector(ssl=ssl.create_default_context())
+        timeout = aiohttp.ClientTimeout(total=120)
+        async with aiohttp.ClientSession(connector=connector, timeout=timeout) as session:
+            kwargs = {"method": method, "url": url, "headers": headers, "data": data}
+            if self.proxy:
+                kwargs["proxy"] = self.proxy
+            try:
+                async with session.request(**kwargs) as response:
+                    body = await response.read()
+                    if response.status >= 400:
+                        raise Exception(
+                            self._format_error_message(
+                                response.status, body.decode("utf-8", "replace")[:1000]
+                            )
+                        )
+                    return response.status, dict(response.headers), body
+            except aiohttp.ClientError as e:
+                raise Exception(f"Network error accessing {url}: {str(e)}")
+
+    # ------------------------------------------------------------------
+    # Schemas & custom fields
+    # ------------------------------------------------------------------
+    async def get_work_package_schema(
+        self,
+        project_id: Optional[int] = None,
+        type_id: Optional[int] = None,
+        schema_href: Optional[str] = None,
+    ) -> Dict:
+        """Get a work package schema by href or by project/type."""
+        if schema_href:
+            endpoint = schema_href.replace("/api/v3", "", 1)
+        elif project_id and type_id:
+            endpoint = f"/work_packages/schemas/{project_id}-{type_id}"
+        else:
+            raise ValueError("Need schema_href or both project_id and type_id")
+        return await self._request("GET", endpoint)
+
+    @staticmethod
+    def schema_custom_fields(schema: Dict) -> Dict[str, Dict]:
+        """Return {customFieldN: field_schema} from a work package schema."""
+        return {
+            k: v
+            for k, v in schema.items()
+            if k.startswith("customField") and isinstance(v, dict)
+        }
+
+    @staticmethod
+    def custom_field_options(field: Dict) -> List[Dict]:
+        """Return allowed values as [{'href', 'title'}] for list-type custom fields."""
+        options = []
+        for item in field.get("_embedded", {}).get("allowedValues", []) or []:
+            href = item.get("_links", {}).get("self", {}).get("href")
+            if not href and item.get("id") is not None:
+                href = f"/api/v3/custom_options/{item['id']}"
+            options.append({"href": href, "title": item.get("value") or item.get("name")})
+        if not options:
+            for link in field.get("_links", {}).get("allowedValues", []) or []:
+                if isinstance(link, dict):
+                    options.append({"href": link.get("href"), "title": link.get("title")})
+        return options
+
+    def resolve_custom_fields(self, schema: Dict, custom_fields: Dict[str, Any]) -> tuple:
+        """Translate {name_or_key: value} into (properties, _links) for the API.
+
+        Keys may be 'customField5' or the field's display name (case-insensitive).
+        List fields accept option id or option label; user/version fields accept ids.
+        A value of None clears the field.
+        """
+        fields = self.schema_custom_fields(schema)
+        by_name = {str(v.get("name", "")).lower(): k for k, v in fields.items()}
+        props: Dict[str, Any] = {}
+        links: Dict[str, Any] = {}
+
+        for key, value in custom_fields.items():
+            cf_key = key if key in fields else by_name.get(str(key).lower())
+            if not cf_key:
+                available = ", ".join(f"{v.get('name')} ({k})" for k, v in fields.items())
+                raise ValueError(
+                    f"Unknown custom field '{key}' for this project/type. "
+                    f"Available: {available or 'none'}"
+                )
+            field = fields[cf_key]
+            ftype = str(field.get("type", ""))
+            multi = ftype.startswith("[]")
+            base = ftype[2:] if multi else ftype
+            values = value if isinstance(value, list) else [value]
+
+            if base == "CustomOption":
+                options = self.custom_field_options(field)
+
+                def to_href(v):
+                    if v is None:
+                        return None
+                    sv = str(v).strip()
+                    for opt in options:
+                        href = opt.get("href") or ""
+                        if sv.isdigit() and href.rstrip("/").endswith(f"/{sv}"):
+                            return href
+                        if str(opt.get("title", "")).lower() == sv.lower():
+                            return href
+                    labels = ", ".join(str(o.get("title")) for o in options)
+                    raise ValueError(
+                        f"'{v}' is not a valid option for {field.get('name')}. Options: {labels}"
+                    )
+
+                hrefs = [{"href": to_href(v)} for v in values if v is not None]
+                links[cf_key] = hrefs if multi else (hrefs[0] if hrefs else {"href": None})
+            elif base in ("User", "Version", "Group", "Principal"):
+                path = {"User": "users", "Version": "versions", "Group": "groups",
+                        "Principal": "principals"}[base]
+                hrefs = [{"href": f"/api/v3/{path}/{int(v)}"} for v in values if v is not None]
+                links[cf_key] = hrefs if multi else (hrefs[0] if hrefs else {"href": None})
+            elif base == "Link":
+                links[cf_key] = {"href": value}
+            elif base == "Formattable":
+                props[cf_key] = {"raw": "" if value is None else str(value)}
+            else:
+                props[cf_key] = value
+
+        return props, links
+
+    # ------------------------------------------------------------------
+    # Attachments
+    # ------------------------------------------------------------------
+    async def get_work_package_attachments(self, work_package_id: int) -> Dict:
+        """List attachments of a work package."""
+        return await self._request("GET", f"/work_packages/{work_package_id}/attachments")
+
+    async def get_attachment(self, attachment_id: int) -> Dict:
+        """Get attachment metadata."""
+        return await self._request("GET", f"/attachments/{attachment_id}")
+
+    async def upload_work_package_attachment(
+        self,
+        work_package_id: int,
+        file_name: str,
+        content: bytes,
+        content_type: str = "application/octet-stream",
+        description: Optional[str] = None,
+    ) -> Dict:
+        """Upload a file to a work package (multipart: metadata + file)."""
+        metadata: Dict[str, Any] = {"fileName": file_name}
+        if description:
+            metadata["description"] = {"raw": description}
+        form = aiohttp.FormData()
+        form.add_field("metadata", json.dumps(metadata), content_type="application/json")
+        form.add_field("file", content, filename=file_name, content_type=content_type)
+        _, _, body = await self._raw_request(
+            "POST",
+            f"/api/v3/work_packages/{work_package_id}/attachments",
+            data=form,
+            accept="application/json",
+        )
+        return json.loads(body) if body else {}
+
+    async def download_attachment(self, attachment_id: int) -> tuple:
+        """Download attachment content. Returns (metadata, content_type, bytes)."""
+        meta = await self.get_attachment(attachment_id)
+        href = meta.get("_links", {}).get("downloadLocation", {}).get("href") or (
+            f"/api/v3/attachments/{attachment_id}/content"
+        )
+        _, headers, body = await self._raw_request("GET", href)
+        content_type = headers.get("Content-Type") or meta.get("contentType") or ""
+        return meta, content_type, body
+
+    async def delete_attachment(self, attachment_id: int) -> bool:
+        """Delete an attachment."""
+        await self._request("DELETE", f"/attachments/{attachment_id}")
         return True
 

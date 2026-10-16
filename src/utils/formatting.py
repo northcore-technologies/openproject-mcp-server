@@ -191,6 +191,19 @@ def format_work_package_detail(wp: Dict) -> str:
     else:
         text += f"**Assignee**: Unassigned\n"
 
+    responsible_link = links.get("responsible")
+    if responsible_link and responsible_link.get("href"):
+        text += f"**Accountable**: {responsible_link.get('title', 'Unknown')}\n"
+
+    # Work estimates (ISO 8601 durations)
+    from src.client import format_hours
+    if wp.get("estimatedTime"):
+        text += f"**Work**: {format_hours(wp['estimatedTime'])}\n"
+    if wp.get("remainingTime"):
+        text += f"**Remaining work**: {format_hours(wp['remainingTime'])}\n"
+    if wp.get("duration"):
+        text += f"**Duration**: {wp['duration']}\n"
+
     # Dates
     if wp.get('startDate'):
         text += f"**Start Date**: {wp['startDate']}\n"
