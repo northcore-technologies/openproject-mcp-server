@@ -117,7 +117,11 @@ async def get_project(project_id: int) -> str:
         text = f"✅ Project #{project.get('id')}\n\n"
         text += f"**Name**: {project.get('name', 'Unknown')}\n"
         text += f"**Identifier**: {project.get('identifier', 'N/A')}\n"
-        text += f"**Status**: {'Active' if project.get('active') else 'Inactive'}\n"
+        text += f"**Active**: {'Yes' if project.get('active') else 'No'}\n"
+        text += f"**Status**: {_status_text(project)}\n"
+        expl = (project.get("statusExplanation") or {}).get("raw")
+        if expl:
+            text += f"**Status explanation**: {expl}\n"
         text += f"**Public**: {'Yes' if project.get('public') else 'No'}\n"
 
         if project.get('description'):
@@ -144,13 +148,25 @@ async def get_project(project_id: int) -> str:
         return f"❌ Failed to get project: {str(e)}"
 
 
+PROJECT_STATUSES = ("not_started", "on_track", "at_risk", "off_track", "finished", "discontinued")
+STATUS_DESC = "Project status: " + ", ".join(PROJECT_STATUSES)
+
+
+def _status_text(project: dict) -> str:
+    link = project.get("_links", {}).get("status") or {}
+    if link.get("href"):
+        return link.get("title") or link["href"].rsplit("/", 1)[-1]
+    return "Not set"
+
+
 class CreateProjectInput(BaseModel):
     """Input model for creating projects."""
     name: str = Field(..., description="Project name", min_length=1, max_length=255)
     identifier: str = Field(..., description="Project identifier (lowercase, no spaces)", min_length=1, max_length=100)
     description: Optional[str] = Field(None, description="Project description")
     public: Optional[bool] = Field(None, description="Whether project is public")
-    status: Optional[str] = Field(None, description="Project status")
+    status: Optional[str] = Field(None, description=STATUS_DESC)
+    status_explanation: Optional[str] = Field(None, description="Status explanation text")
     parent_id: Optional[int] = Field(None, description="Parent project ID for sub-projects", gt=0)
     custom_fields: Optional[Dict[str, Any]] = Field(
         None,
@@ -176,7 +192,8 @@ class UpdateProjectInput(BaseModel):
     identifier: Optional[str] = Field(None, description="New project identifier", min_length=1, max_length=100)
     description: Optional[str] = Field(None, description="New project description")
     public: Optional[bool] = Field(None, description="Whether project is public")
-    status: Optional[str] = Field(None, description="New project status")
+    status: Optional[str] = Field(None, description=STATUS_DESC)
+    status_explanation: Optional[str] = Field(None, description="Status explanation text")
     parent_id: Optional[int] = Field(None, description="New parent project ID", gt=0)
     custom_fields: Optional[Dict[str, Any]] = Field(
         None,
@@ -217,7 +234,11 @@ async def create_project(input: CreateProjectInput) -> str:
         if input.public is not None:
             data["public"] = input.public
         if input.status is not None:
+            if input.status not in PROJECT_STATUSES:
+                return format_error(f"Invalid status '{input.status}'. Use one of: {', '.join(PROJECT_STATUSES)}")
             data["status"] = input.status
+        if input.status_explanation is not None:
+            data["status_explanation"] = input.status_explanation
         if input.parent_id is not None:
             data["parent_id"] = input.parent_id
         if input.custom_fields:
@@ -230,7 +251,7 @@ async def create_project(input: CreateProjectInput) -> str:
         text += f"**ID**: #{result.get('id', 'N/A')}\n"
         text += f"**Identifier**: {result.get('identifier', 'N/A')}\n"
         text += f"**Public**: {'Yes' if result.get('public') else 'No'}\n"
-        text += f"**Status**: {result.get('status', 'N/A')}\n"
+        text += f"**Status**: {_status_text(result)}\n"
         attrs = await _project_attribute_lines(client, result, only_set=True)
         if attrs:
             text += "**Project attributes**:\n" + "\n".join(attrs) + "\n"
@@ -373,7 +394,11 @@ async def update_project(input: UpdateProjectInput) -> str:
         if input.public is not None:
             update_data["public"] = input.public
         if input.status is not None:
+            if input.status not in PROJECT_STATUSES:
+                return format_error(f"Invalid status '{input.status}'. Use one of: {', '.join(PROJECT_STATUSES)}")
             update_data["status"] = input.status
+        if input.status_explanation is not None:
+            update_data["status_explanation"] = input.status_explanation
         if input.parent_id is not None:
             update_data["parent_id"] = input.parent_id
         if input.custom_fields:
@@ -388,7 +413,7 @@ async def update_project(input: UpdateProjectInput) -> str:
         text += f"**Name**: {result.get('name', 'N/A')}\n"
         text += f"**Identifier**: {result.get('identifier', 'N/A')}\n"
         text += f"**Public**: {'Yes' if result.get('public') else 'No'}\n"
-        text += f"**Status**: {result.get('status', 'N/A')}\n"
+        text += f"**Status**: {_status_text(result)}\n"
         attrs = await _project_attribute_lines(client, result, only_set=True)
         if attrs:
             text += "**Project attributes**:\n" + "\n".join(attrs) + "\n"
