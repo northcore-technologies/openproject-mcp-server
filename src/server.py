@@ -79,6 +79,14 @@ try:
     from src.tools import weekly_reports   # 4 tools: generate_weekly_report, get_report_data, generate_this_week_report, generate_last_week_report
     from src.tools import news             # 5 tools: list_news, create_news, get_news, update_news, delete_news
 
+    # Northcore fork additions
+    from src.tools import custom_fields    # 1 tool: list_custom_fields
+    from src.tools import attachments      # 4 tools: list, upload, download, delete
+    from src.tools import watchers         # 4 tools: list/add/remove watcher, list_categories
+    from src.tools import project_copy     # 2 tools: list_template_projects, copy_project
+    from src.tools import notifications    # 2 tools: list_notifications, mark_notifications_read
+    from src.tools import bulk             # 1 tool: bulk_update_work_packages
+
     logger.info("✅ All 49 tool modules loaded successfully")
 except ImportError as e:
     logger.warning(f"⚠️  Some tool modules failed to import: {e}")

@@ -1,10 +1,11 @@
 """Work package management tools - Priority CRITICAL tools for 12 users."""
 
 import json
-from typing import Optional
+from typing import Any, Dict, Optional
 from pydantic import BaseModel, Field
 
 from src.server import mcp, get_client
+from src.client import format_hours
 from src.utils.formatting import (
     format_work_package_list,
     format_work_package_detail,
@@ -25,6 +26,17 @@ class CreateWorkPackageInput(BaseModel):
     due_date: Optional[str] = Field(None, description="Due date in ISO format (YYYY-MM-DD)")
     assignee_id: Optional[int] = Field(None, description="Assignee user ID", gt=0)
     responsible_id: Optional[int] = Field(None, description="Accountable (responsible) user ID", gt=0)
+    category_id: Optional[int] = Field(None, description="Category ID (use list_categories)", gt=0)
+    estimated_hours: Optional[float] = Field(None, description="Work estimate in hours (e.g. 4 or 2.5)", ge=0)
+    remaining_hours: Optional[float] = Field(None, description="Remaining work in hours", ge=0)
+    duration_days: Optional[int] = Field(None, description="Duration in working days (needs start or due date)", gt=0)
+    schedule_manually: Optional[bool] = Field(None, description="True = manual scheduling, False = automatic")
+    custom_fields: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Custom field values keyed by field name or 'customFieldN'. "
+        "List fields take the option label or id; user fields take a user id. "
+        "Use list_custom_fields to see available fields.",
+    )
     status_id: Optional[int] = Field(None, description="Status ID", gt=0)
     priority_id: Optional[int] = Field(None, description="Priority ID", gt=0)
     version_id: Optional[int] = Field(None, description="Version/milestone ID to assign work package to", gt=0)
@@ -41,6 +53,16 @@ class UpdateWorkPackageInput(BaseModel):
     priority_id: Optional[int] = Field(None, description="New priority ID", gt=0)
     assignee_id: Optional[int] = Field(None, description="New assignee user ID", gt=0)
     responsible_id: Optional[int] = Field(None, description="New accountable (responsible) user ID", gt=0)
+    category_id: Optional[int] = Field(None, description="New category ID (use list_categories)", gt=0)
+    estimated_hours: Optional[float] = Field(None, description="New work estimate in hours", ge=0)
+    remaining_hours: Optional[float] = Field(None, description="New remaining work in hours", ge=0)
+    duration_days: Optional[int] = Field(None, description="New duration in working days", gt=0)
+    schedule_manually: Optional[bool] = Field(None, description="True = manual scheduling, False = automatic")
+    custom_fields: Optional[Dict[str, Any]] = Field(
+        None,
+        description="Custom field values keyed by field name or 'customFieldN' (null clears a field). "
+        "Use list_custom_fields with work_package_id to see fields and current values.",
+    )
     start_date: Optional[str] = Field(None, description="New start date (YYYY-MM-DD)")
     due_date: Optional[str] = Field(None, description="New due date (YYYY-MM-DD)")
     percentage_done: Optional[int] = Field(None, description="Progress percentage (0-100)", ge=0, le=100)
@@ -294,9 +316,10 @@ async def search_work_packages(
     project_id: Optional[int] = None,
     active_only: bool = True,
     offset: int = 0,
-    page_size: int = 20
+    page_size: int = 20,
+    full_text: bool = False
 ) -> str:
-    """Search work packages by subject or ID - Fast search without pagination.
+    """Search work packages by subject or ID, or full text - Fast search without pagination.
 
     This tool provides quick search functionality using OpenProject's server-side filtering.
     Use this when you need to find specific tasks by name or ID instead of listing all tasks.
@@ -307,6 +330,8 @@ async def search_work_packages(
         active_only: If True, only search open work packages (default: True)
         offset: Starting index for pagination (default: 0)
         page_size: Number of results per page (default: 20, max: 100)
+        full_text: If True, search subject, description and comments
+            (OpenProject's full-text "search" filter) instead of subject/ID only
 
     Returns:
         Formatted list of matching work packages
@@ -334,7 +359,7 @@ async def search_work_packages(
 
         # Add subjectOrId filter for search
         filters_list.append({
-            "subjectOrId": {
+            ("search" if full_text else "subjectOrId"): {
                 "operator": "**",
                 "values": [query.strip()]
             }
@@ -431,6 +456,18 @@ async def create_work_package(input: CreateWorkPackageInput) -> str:
             data["assignee_id"] = input.assignee_id
         if input.responsible_id:
             data["responsible_id"] = input.responsible_id
+        if input.category_id is not None:
+            data["category_id"] = input.category_id
+        if input.estimated_hours is not None:
+            data["estimated_hours"] = input.estimated_hours
+        if input.remaining_hours is not None:
+            data["remaining_hours"] = input.remaining_hours
+        if input.duration_days is not None:
+            data["duration_days"] = input.duration_days
+        if input.schedule_manually is not None:
+            data["schedule_manually"] = input.schedule_manually
+        if input.custom_fields:
+            data["custom_fields"] = input.custom_fields
         if input.version_id:
             data["version_id"] = input.version_id
 
@@ -462,6 +499,10 @@ async def create_work_package(input: CreateWorkPackageInput) -> str:
             text += f"**Assignee**: {embedded['assignee'].get('name', 'Unassigned')}\n"
         if "responsible" in embedded:
             text += f"**Accountable**: {embedded['responsible'].get('name', 'None')}\n"
+        if result.get("estimatedTime"):
+            text += f"**Work**: {format_hours(result['estimatedTime'])}\n"
+        if result.get("remainingTime"):
+            text += f"**Remaining work**: {format_hours(result['remainingTime'])}\n"
 
         if result.get('startDate'):
             text += f"**Start Date**: {result['startDate']}\n"
@@ -517,6 +558,18 @@ async def update_work_package(input: UpdateWorkPackageInput) -> str:
             data["assignee_id"] = input.assignee_id
         if input.responsible_id is not None:
             data["responsible_id"] = input.responsible_id
+        if input.category_id is not None:
+            data["category_id"] = input.category_id
+        if input.estimated_hours is not None:
+            data["estimated_hours"] = input.estimated_hours
+        if input.remaining_hours is not None:
+            data["remaining_hours"] = input.remaining_hours
+        if input.duration_days is not None:
+            data["duration_days"] = input.duration_days
+        if input.schedule_manually is not None:
+            data["schedule_manually"] = input.schedule_manually
+        if input.custom_fields:
+            data["custom_fields"] = input.custom_fields
         if input.percentage_done is not None:
             data["percentage_done"] = input.percentage_done
         if input.version_id is not None:
@@ -553,6 +606,10 @@ async def update_work_package(input: UpdateWorkPackageInput) -> str:
             text += f"**Assignee**: {embedded['assignee'].get('name', 'Unassigned')}\n"
         if "responsible" in embedded:
             text += f"**Accountable**: {embedded['responsible'].get('name', 'None')}\n"
+        if result.get("estimatedTime"):
+            text += f"**Work**: {format_hours(result['estimatedTime'])}\n"
+        if result.get("remainingTime"):
+            text += f"**Remaining work**: {format_hours(result['remainingTime'])}\n"
 
         if result.get('startDate'):
             text += f"**Start Date**: {result['startDate']}\n"

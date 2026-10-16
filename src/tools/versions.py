@@ -116,3 +116,48 @@ async def create_version(input: CreateVersionInput) -> str:
 
     except Exception as e:
         return format_error(f"Failed to create version: {str(e)}")
+
+
+@mcp.tool
+async def update_version(
+    version_id: int,
+    name: Optional[str] = None,
+    description: Optional[str] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    status: Optional[str] = None,
+    sharing: Optional[str] = None,
+) -> str:
+    """Update a version/milestone.
+
+    Args:
+        version_id: Version ID
+        status: open, locked or closed
+        sharing: none, descendants, hierarchy, tree or system
+        start_date / end_date: YYYY-MM-DD
+    """
+    try:
+        data = {k: v for k, v in {
+            "name": name, "description": description, "start_date": start_date,
+            "end_date": end_date, "status": status, "sharing": sharing,
+        }.items() if v is not None}
+        if not data:
+            return format_error("No fields provided to update")
+        v = await get_client().update_version(version_id, data)
+        return format_success(
+            f"Version **{v.get('name')}** (ID: {v.get('id')}) updated – status {v.get('status')}, "
+            f"{v.get('startDate') or '?'} → {v.get('endDate') or '?'}"
+        )
+    except Exception as e:
+        return format_error(f"Failed to update version: {str(e)}")
+
+
+@mcp.tool
+async def delete_version(version_id: int) -> str:
+    """Delete a version/milestone (only possible when no work packages use it)."""
+    try:
+        await get_client().delete_version(version_id)
+        return format_success(f"Version {version_id} deleted")
+    except Exception as e:
+        return format_error(f"Failed to delete version: {str(e)}")
+
