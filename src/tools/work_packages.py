@@ -24,6 +24,7 @@ class CreateWorkPackageInput(BaseModel):
     start_date: Optional[str] = Field(None, description="Start date in ISO format (YYYY-MM-DD)")
     due_date: Optional[str] = Field(None, description="Due date in ISO format (YYYY-MM-DD)")
     assignee_id: Optional[int] = Field(None, description="Assignee user ID", gt=0)
+    responsible_id: Optional[int] = Field(None, description="Accountable (responsible) user ID", gt=0)
     status_id: Optional[int] = Field(None, description="Status ID", gt=0)
     priority_id: Optional[int] = Field(None, description="Priority ID", gt=0)
     version_id: Optional[int] = Field(None, description="Version/milestone ID to assign work package to", gt=0)
@@ -39,6 +40,7 @@ class UpdateWorkPackageInput(BaseModel):
     status_id: Optional[int] = Field(None, description="New status ID", gt=0)
     priority_id: Optional[int] = Field(None, description="New priority ID", gt=0)
     assignee_id: Optional[int] = Field(None, description="New assignee user ID", gt=0)
+    responsible_id: Optional[int] = Field(None, description="New accountable (responsible) user ID", gt=0)
     start_date: Optional[str] = Field(None, description="New start date (YYYY-MM-DD)")
     due_date: Optional[str] = Field(None, description="New due date (YYYY-MM-DD)")
     percentage_done: Optional[int] = Field(None, description="Progress percentage (0-100)", ge=0, le=100)
@@ -427,6 +429,8 @@ async def create_work_package(input: CreateWorkPackageInput) -> str:
             data["priority_id"] = input.priority_id
         if input.assignee_id:
             data["assignee_id"] = input.assignee_id
+        if input.responsible_id:
+            data["responsible_id"] = input.responsible_id
         if input.version_id:
             data["version_id"] = input.version_id
 
@@ -456,6 +460,8 @@ async def create_work_package(input: CreateWorkPackageInput) -> str:
             text += f"**Priority**: {embedded['priority'].get('name', 'Unknown')}\n"
         if "assignee" in embedded:
             text += f"**Assignee**: {embedded['assignee'].get('name', 'Unassigned')}\n"
+        if "responsible" in embedded:
+            text += f"**Accountable**: {embedded['responsible'].get('name', 'None')}\n"
 
         if result.get('startDate'):
             text += f"**Start Date**: {result['startDate']}\n"
@@ -509,6 +515,8 @@ async def update_work_package(input: UpdateWorkPackageInput) -> str:
             data["priority_id"] = input.priority_id
         if input.assignee_id is not None:
             data["assignee_id"] = input.assignee_id
+        if input.responsible_id is not None:
+            data["responsible_id"] = input.responsible_id
         if input.percentage_done is not None:
             data["percentage_done"] = input.percentage_done
         if input.version_id is not None:
@@ -543,6 +551,8 @@ async def update_work_package(input: UpdateWorkPackageInput) -> str:
             text += f"**Priority**: {embedded['priority'].get('name', 'Unknown')}\n"
         if "assignee" in embedded:
             text += f"**Assignee**: {embedded['assignee'].get('name', 'Unassigned')}\n"
+        if "responsible" in embedded:
+            text += f"**Accountable**: {embedded['responsible'].get('name', 'None')}\n"
 
         if result.get('startDate'):
             text += f"**Start Date**: {result['startDate']}\n"
