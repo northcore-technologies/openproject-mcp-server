@@ -208,6 +208,24 @@ def format_work_package_detail(wp: Dict) -> str:
     if wp.get("duration"):
         text += f"**Duration**: {wp['duration']}\n"
 
+    # Backlogs
+    if wp.get("storyPoints") is not None:
+        text += f"**Story points**: {wp['storyPoints']}\n"
+    if wp.get("position") is not None:
+        text += f"**Backlog position**: {wp['position']}\n"
+    for key, label in (("sprint", "Sprint"), ("version", "Version"), ("budget", "Budget")):
+        link = links.get(key) or {}
+        if link.get("href"):
+            text += f"**{label}**: {link.get('title', link['href'].rsplit('/', 1)[-1])}\n"
+
+    # Time and costs (read-only, calculated by OpenProject)
+    if wp.get("spentTime"):
+        text += f"**Spent time**: {format_hours(wp['spentTime'])}\n"
+    for key, label in (("laborCosts", "Labor costs"), ("materialCosts", "Unit costs"),
+                       ("overallCosts", "Overall costs")):
+        if wp.get(key) not in (None, "", "0.00", "0,00"):
+            text += f"**{label}**: {wp[key]}\n"
+
     # Dates
     if wp.get('startDate'):
         text += f"**Start Date**: {wp['startDate']}\n"

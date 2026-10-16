@@ -56,3 +56,44 @@ async def list_categories(project_id: int) -> str:
         return f"✅ **{len(cats)} categor{'y' if len(cats) == 1 else 'ies'} in project #{project_id}**\n\n" + "\n".join(lines)
     except Exception as e:
         return format_error(f"Failed to list categories: {str(e)}")
+
+
+@mcp.tool
+async def list_sprints(project_id: int) -> str:
+    """List sprints of a project (Backlogs). Use the ID as sprint_id on work packages.
+    On OpenProject versions without the sprints API, backlogs use versions instead (list_versions / version_id)."""
+    try:
+        result = await get_client().get_sprints(project_id)
+    except Exception as e:
+        if "404" in str(e):
+            return (
+                "This OpenProject version has no sprints API. Backlogs here use versions as sprints: "
+                "use list_versions and set version_id on work packages."
+            )
+        return format_error(f"Failed to list sprints: {str(e)}")
+    sprints = result.get("_embedded", {}).get("elements", [])
+    if not sprints:
+        return f"No sprints in project #{project_id}."
+    lines = []
+    for sp in sprints:
+        status = (sp.get("_links", {}).get("status", {}).get("href") or "").rsplit(":", 1)[-1]
+        lines.append(
+            f"- **{sp.get('name')}** (ID: {sp.get('id')}) {status} · "
+            f"{sp.get('startDate') or '?'} → {sp.get('finishDate') or '?'}"
+        )
+    return f"✅ **{len(sprints)} sprint(s) in project #{project_id}**\n\n" + "\n".join(lines)
+
+
+@mcp.tool
+async def list_budgets(project_id: int) -> str:
+    """List budgets of a project (Budgets module). Use the ID as budget_id on work packages."""
+    try:
+        result = await get_client().get_budgets(project_id)
+        budgets = result.get("_embedded", {}).get("elements", [])
+        if not budgets:
+            return f"No budgets in project #{project_id}."
+        lines = [f"- **{b.get('subject')}** (ID: {b.get('id')})" for b in budgets]
+        return f"✅ **{len(budgets)} budget(s) in project #{project_id}**\n\n" + "\n".join(lines)
+    except Exception as e:
+        return format_error(f"Failed to list budgets: {str(e)}")
+

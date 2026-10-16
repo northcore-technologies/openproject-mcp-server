@@ -312,6 +312,16 @@ class OpenProjectClient:
             payload["_links"]["responsible"] = {
                 "href": f"/api/v3/users/{data['responsible_id']}"
             }
+        if "story_points" in data:
+            payload["storyPoints"] = data["story_points"]
+        if "budget_id" in data:
+            payload.setdefault("_links", {})["budget"] = {
+                "href": f"/api/v3/budgets/{data['budget_id']}" if data["budget_id"] else None
+            }
+        if "sprint_id" in data:
+            payload.setdefault("_links", {})["sprint"] = {
+                "href": f"/api/v3/sprints/{data['sprint_id']}" if data["sprint_id"] else None
+            }
         if "category_id" in data:
             payload.setdefault("_links", {})["category"] = {
                 "href": f"/api/v3/categories/{data['category_id']}" if data["category_id"] else None
@@ -547,6 +557,16 @@ class OpenProjectClient:
                 payload["_links"] = {}
             payload["_links"]["responsible"] = {
                 "href": f"/api/v3/users/{data['responsible_id']}"
+            }
+        if "story_points" in data:
+            payload["storyPoints"] = data["story_points"]
+        if "budget_id" in data:
+            payload.setdefault("_links", {})["budget"] = {
+                "href": f"/api/v3/budgets/{data['budget_id']}" if data["budget_id"] else None
+            }
+        if "sprint_id" in data:
+            payload.setdefault("_links", {})["sprint"] = {
+                "href": f"/api/v3/sprints/{data['sprint_id']}" if data["sprint_id"] else None
             }
         if "category_id" in data:
             payload.setdefault("_links", {})["category"] = {
@@ -1820,4 +1840,13 @@ class OpenProjectClient:
         except Exception as e:
             logger.debug(f"Project form unavailable, falling back to /projects/schema: {e}")
         return await self._request("GET", "/projects/schema")
+
+    # ------------------------------------------------------------------
+    # Backlogs (sprints) and budgets
+    # ------------------------------------------------------------------
+    async def get_sprints(self, project_id: int) -> Dict:
+        return await self._request("GET", f"/projects/{project_id}/sprints?pageSize=100")
+
+    async def get_budgets(self, project_id: int) -> Dict:
+        return await self._request("GET", f"/projects/{project_id}/budgets")
 

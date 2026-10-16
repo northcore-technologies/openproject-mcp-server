@@ -27,6 +27,9 @@ class CreateWorkPackageInput(BaseModel):
     assignee_id: Optional[int] = Field(None, description="Assignee user ID", gt=0)
     responsible_id: Optional[int] = Field(None, description="Accountable (responsible) user ID", gt=0)
     category_id: Optional[int] = Field(None, description="Category ID (use list_categories)", gt=0)
+    story_points: Optional[int] = Field(None, description="Story points (Backlogs module)", ge=0)
+    sprint_id: Optional[int] = Field(None, description="Sprint ID (use list_sprints)", gt=0)
+    budget_id: Optional[int] = Field(None, description="Budget ID (use list_budgets)", gt=0)
     estimated_hours: Optional[float] = Field(None, description="Work estimate in hours (e.g. 4 or 2.5)", ge=0)
     remaining_hours: Optional[float] = Field(None, description="Remaining work in hours", ge=0)
     duration_days: Optional[int] = Field(None, description="Duration in working days (needs start or due date)", gt=0)
@@ -54,6 +57,9 @@ class UpdateWorkPackageInput(BaseModel):
     assignee_id: Optional[int] = Field(None, description="New assignee user ID", gt=0)
     responsible_id: Optional[int] = Field(None, description="New accountable (responsible) user ID", gt=0)
     category_id: Optional[int] = Field(None, description="New category ID (use list_categories)", gt=0)
+    story_points: Optional[int] = Field(None, description="Story points (Backlogs module)", ge=0)
+    sprint_id: Optional[int] = Field(None, description="Sprint ID (use list_sprints)", gt=0)
+    budget_id: Optional[int] = Field(None, description="Budget ID (use list_budgets)", gt=0)
     estimated_hours: Optional[float] = Field(None, description="New work estimate in hours", ge=0)
     remaining_hours: Optional[float] = Field(None, description="New remaining work in hours", ge=0)
     duration_days: Optional[int] = Field(None, description="New duration in working days", gt=0)
@@ -458,6 +464,12 @@ async def create_work_package(input: CreateWorkPackageInput) -> str:
             data["responsible_id"] = input.responsible_id
         if input.category_id is not None:
             data["category_id"] = input.category_id
+        if input.story_points is not None:
+            data["story_points"] = input.story_points
+        if input.sprint_id is not None:
+            data["sprint_id"] = input.sprint_id
+        if input.budget_id is not None:
+            data["budget_id"] = input.budget_id
         if input.estimated_hours is not None:
             data["estimated_hours"] = input.estimated_hours
         if input.remaining_hours is not None:
@@ -501,6 +513,8 @@ async def create_work_package(input: CreateWorkPackageInput) -> str:
             text += f"**Accountable**: {embedded['responsible'].get('name', 'None')}\n"
         if result.get("estimatedTime"):
             text += f"**Work**: {format_hours(result['estimatedTime'])}\n"
+        if result.get("storyPoints") is not None:
+            text += f"**Story points**: {result['storyPoints']}\n"
         if result.get("remainingTime"):
             text += f"**Remaining work**: {format_hours(result['remainingTime'])}\n"
 
@@ -560,6 +574,12 @@ async def update_work_package(input: UpdateWorkPackageInput) -> str:
             data["responsible_id"] = input.responsible_id
         if input.category_id is not None:
             data["category_id"] = input.category_id
+        if input.story_points is not None:
+            data["story_points"] = input.story_points
+        if input.sprint_id is not None:
+            data["sprint_id"] = input.sprint_id
+        if input.budget_id is not None:
+            data["budget_id"] = input.budget_id
         if input.estimated_hours is not None:
             data["estimated_hours"] = input.estimated_hours
         if input.remaining_hours is not None:
@@ -608,6 +628,8 @@ async def update_work_package(input: UpdateWorkPackageInput) -> str:
             text += f"**Accountable**: {embedded['responsible'].get('name', 'None')}\n"
         if result.get("estimatedTime"):
             text += f"**Work**: {format_hours(result['estimatedTime'])}\n"
+        if result.get("storyPoints") is not None:
+            text += f"**Story points**: {result['storyPoints']}\n"
         if result.get("remainingTime"):
             text += f"**Remaining work**: {format_hours(result['remainingTime'])}\n"
 
@@ -622,6 +644,41 @@ async def update_work_package(input: UpdateWorkPackageInput) -> str:
 
     except Exception as e:
         return format_error(f"Failed to update work package: {str(e)}")
+
+
+@mcp.tool
+async def get_work_package(work_package_id: int) -> str:
+    """Get full details of one work package: status, people, dates, estimates,
+    backlogs (story points, sprint, position), budget, costs and custom fields."""
+    try:
+        client = get_client()
+        wp = await client.get_work_package(work_package_id)
+        text = format_work_package_detail(wp)
+
+        keys = [k for k in list(wp.keys()) + list(wp.get("_links", {}).keys()) if k.startswith("customField")]
+        if keys:
+            try:
+                href = wp.get("_links", {}).get("schema", {}).get("href")
+                fields = client.schema_custom_fields(await client.get_work_package_schema(schema_href=href))
+            except Exception:
+                fields = {}
+            lines = []
+            for key in sorted(set(keys), key=lambda k: str(fields.get(k, {}).get("name", k))):
+                link = wp.get("_links", {}).get(key)
+                if link is not None:
+                    items = link if isinstance(link, list) else [link]
+                    value = ", ".join(str(i.get("title") or i.get("href")) for i in items if i and i.get("href"))
+                else:
+                    value = wp.get(key)
+                    if isinstance(value, dict):
+                        value = value.get("raw")
+                if value not in (None, "", []):
+                    lines.append(f"- **{fields.get(key, {}).get('name', key)}**: {value}")
+            if lines:
+                text += "\n**Custom fields**:\n" + "\n".join(lines) + "\n"
+        return text
+    except Exception as e:
+        return format_error(f"Failed to get work package: {str(e)}")
 
 
 @mcp.tool
