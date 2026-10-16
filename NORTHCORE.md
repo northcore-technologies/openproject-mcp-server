@@ -8,6 +8,7 @@ Deployed from the `northcore` branch on darpa (10.10.2.67), published at `https:
 | Area | Change |
 |---|---|
 | HTTP transport | Endpoint path configurable via `MCP_HTTP_PATH` (default `/mcp`) |
+| Pagination | List calls (projects, users, types, versions, memberships, roles, statuses, priorities, categories, relations, time entries, watchers, attachments, sprints, budgets) follow all pages (up to 2000 items) instead of stopping at OpenProject's default 20. `offset` on work package/news lists is converted from item index to OpenProject's page number |
 | Python | `.python-version` = 3.13; `aiohttp` bumped to 3.14.x (wheels for 3.13 and 3.14, no compiler needed) |
 | Work packages | `responsible_id` (Accountable) on create/update |
 | Work packages | `estimated_hours` (Work), `remaining_hours`, `duration_days`, `schedule_manually` on create/update; shown in responses |
